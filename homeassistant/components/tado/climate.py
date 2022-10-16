@@ -43,8 +43,10 @@ from .const import (
     HA_TO_TADO_FAN_MODE_MAP,
     HA_TO_TADO_HVAC_MODE_MAP,
     ORDERED_KNOWN_TADO_MODES,
+    PRESET_AUTO,
     SIGNAL_TADO_UPDATE_RECEIVED,
-    SUPPORT_PRESET,
+    SUPPORT_PRESET_AUTO,
+    SUPPORT_PRESET_MANUAL,
     TADO_HVAC_ACTION_TO_HA_HVAC_ACTION,
     TADO_MODES_WITH_NO_TEMP_SETTING,
     TADO_SWING_OFF,
@@ -269,9 +271,11 @@ class TadoClimate(TadoZoneEntity, ClimateEntity):
         self._current_tado_swing_mode = TADO_SWING_OFF
 
         self._tado_zone_data = None
+        self._tado_geofence_data = None
 
         self._tado_zone_temp_offset = {}
 
+        self._async_update_home_data()
         self._async_update_zone_data()
 
     async def async_added_to_hass(self) -> None:
@@ -280,10 +284,18 @@ class TadoClimate(TadoZoneEntity, ClimateEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
+                SIGNAL_TADO_UPDATE_RECEIVED.format(self._tado.home_id, "home", "data"),
+                self._async_update_home_callback,
+            )
+        )
+
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
                 SIGNAL_TADO_UPDATE_RECEIVED.format(
                     self._tado.home_id, "zone", self.zone_id
                 ),
-                self._async_update_callback,
+                self._async_update_zone_callback,
             )
         )
 
@@ -356,7 +368,11 @@ class TadoClimate(TadoZoneEntity, ClimateEntity):
 
     @property
     def preset_mode(self):
-        """Return the current preset mode (home, away)."""
+        """Return the current preset mode (home, away or auto)."""
+
+        if "presenceLocked" in self._tado_geofence_data:
+            if not self._tado_geofence_data["presenceLocked"]:
+                return PRESET_AUTO
         if self._tado_zone_data.is_away:
             return PRESET_AWAY
         return PRESET_HOME
@@ -364,7 +380,9 @@ class TadoClimate(TadoZoneEntity, ClimateEntity):
     @property
     def preset_modes(self):
         """Return a list of available preset modes."""
-        return SUPPORT_PRESET
+        if self._tado.get_auto_geofencing_supported():
+            return SUPPORT_PRESET_AUTO
+        return SUPPORT_PRESET_MANUAL
 
     def set_preset_mode(self, preset_mode: str) -> None:
         """Set new preset mode."""
@@ -508,9 +526,20 @@ class TadoClimate(TadoZoneEntity, ClimateEntity):
         self._current_tado_swing_mode = self._tado_zone_data.current_swing_mode
 
     @callback
-    def _async_update_callback(self):
+    def _async_update_zone_callback(self):
         """Load tado data and update state."""
         self._async_update_zone_data()
+        self.async_write_ha_state()
+
+    @callback
+    def _async_update_home_data(self):
+        """Load tado geofencing data into zone."""
+        self._tado_geofence_data = self._tado.data["geofence"]
+
+    @callback
+    def _async_update_home_callback(self):
+        """Load tado data and update state."""
+        self._async_update_home_data()
         self.async_write_ha_state()
 
     def _normalize_target_temp_for_hvac_mode(self):

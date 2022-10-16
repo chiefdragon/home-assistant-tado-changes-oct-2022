@@ -29,6 +29,9 @@ HOME_SENSORS = {
     "outdoor temperature",
     "solar percentage",
     "weather condition",
+    "tado mode",
+    "geofencing mode",
+    "automatic geofencing",
 }
 
 ZONE_SENSORS = {
@@ -101,6 +104,7 @@ class TadoHomeSensor(TadoHomeEntity, SensorEntity):
         self._state = None
         self._state_attributes = None
         self._tado_weather_data = self._tado.data["weather"]
+        self._tado_geofence_data = self._tado.data["geofence"]
 
     async def async_added_to_hass(self) -> None:
         """Register for sensor updates."""
@@ -108,9 +112,7 @@ class TadoHomeSensor(TadoHomeEntity, SensorEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                SIGNAL_TADO_UPDATE_RECEIVED.format(
-                    self._tado.home_id, "weather", "data"
-                ),
+                SIGNAL_TADO_UPDATE_RECEIVED.format(self._tado.home_id, "home", "data"),
                 self._async_update_callback,
             )
         )
@@ -145,6 +147,12 @@ class TadoHomeSensor(TadoHomeEntity, SensorEntity):
             return PERCENTAGE
         if self.home_variable == "weather condition":
             return None
+        if self.home_variable == "tado mode":
+            return None
+        if self.home_variable == "automatic geofencing":
+            return None
+        if self.home_variable == "geofencing mode":
+            return None
 
     @property
     def device_class(self):
@@ -171,6 +179,7 @@ class TadoHomeSensor(TadoHomeEntity, SensorEntity):
         """Handle update callbacks."""
         try:
             self._tado_weather_data = self._tado.data["weather"]
+            self._tado_geofence_data = self._tado.data["geofence"]
         except KeyError:
             return
 
@@ -193,6 +202,41 @@ class TadoHomeSensor(TadoHomeEntity, SensorEntity):
             self._state_attributes = {
                 "time": self._tado_weather_data["weatherState"]["timestamp"]
             }
+
+        elif self.home_variable == "tado mode":
+            if "presence" in self._tado_geofence_data:
+                self._state = self._tado_geofence_data["presence"]
+            else:
+                self._state = None
+
+        elif self.home_variable == "automatic geofencing":
+            if "presenceLocked" in self._tado_geofence_data:
+                if self._tado_geofence_data["presenceLocked"]:
+                    self._state = False
+                else:
+                    self._state = True
+            else:
+                self._state = False
+
+        elif self.home_variable == "geofencing mode":
+            tado_mode = ""
+            if "presence" in self._tado_geofence_data:
+                tado_mode = self._tado_geofence_data["presence"]
+            else:
+                tado_mode = "unknown"
+
+            geofencing_switch_mode = ""
+            if "presenceLocked" in self._tado_geofence_data:
+                if self._tado_geofence_data["presenceLocked"]:
+                    geofencing_switch_mode = "manual"
+                else:
+                    geofencing_switch_mode = "auto"
+            else:
+                geofencing_switch_mode = "manual"
+
+            self._state = (
+                f"{tado_mode.capitalize()} ({geofencing_switch_mode.capitalize()})"
+            )
 
 
 class TadoZoneSensor(TadoZoneEntity, SensorEntity):
